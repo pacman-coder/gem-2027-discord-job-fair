@@ -1,0 +1,59 @@
+# Render Blueprint: New → Blueprint → pick this repo.
+# Render asks for every value marked `sync: false` when you create it.
+services:
+  - type: web
+    name: gem-job-fair
+    runtime: node
+    plan: free            # sleeps after 15 min idle; first visit then takes ~1 min. Pick a paid instance to keep it awake.
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: GROUP_NAME
+        value: GEM
+      # BASE_URL is not needed: Render provides the site's URL automatically.
+      # Add BASE_URL only if you connect a custom domain.
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_GUILD_ID
+        sync: false
+      - key: ANNOUNCE_CHANNEL_ID
+        sync: false
+      - key: ROLE_BIRTHDAY_CELEBRATOR
+        sync: false
+      - key: ROLE_CALENDAR_PAINTER
+        sync: false
+      - key: ROLE_PRAYER_STARTER
+        sync: false
+      - key: ROLE_SNACKS_RECRUITER
+        sync: false
+      - key: ROLE_POTLUCK_CLOVER
+        sync: false
+      - key: ROLE_PHOTOGRAPHER
+        sync: false
+      - key: ROLE_EVENTS_COORDINATOR
+        sync: false
+      - key: ROLE_TEA_SOMMELIER
+        sync: false
+      - key: ROLE_AMBASSADOR
+        sync: false
+      - key: ROLE_FIELD_SURVEYOR
+        sync: false
+      - key: ROLE_DIRECTOR_OF_BOARDS
+        sync: false
+      - key: ROLE_CHOIRMASTER
+        sync: false
+      - key: ROLE_PE_TEACHER
+        sync: false
+      - key: ROLE_MARKETING_COORDINATOR
+        sync: false
