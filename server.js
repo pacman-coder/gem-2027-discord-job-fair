@@ -25,7 +25,8 @@ const PORT = process.env.PORT || 3000;
 const PROD = process.env.NODE_ENV === "production";
 const DEMO = /^(1|true|yes)$/i.test(process.env.DEMO_MODE || "") || process.argv.includes("--demo");
 
-const API = "https://discord.com/api/v10";
+// DISCORD_API_BASE exists only so the live-update logic can be tested against a stand-in Discord.
+const API = process.env.DISCORD_API_BASE || "https://discord.com/api/v10";
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
@@ -37,6 +38,7 @@ const REDIRECT_URI = process.env.REDIRECT_URI || `${BASE_URL}/auth/callback`;
 const GROUP_NAME = process.env.GROUP_NAME || "GEM";
 const MAX_JOBS = Number.parseInt(process.env.MAX_JOBS_PER_PERSON || "0", 10) || 0; // 0 = no limit
 const OFFER_TTL_MS = 15 * 60 * 1000;
+const LIVE_CHECK_MS = (Number(process.env.LIVE_CHECK_SECONDS) || 45) * 1000; // how often to look for role changes made in Discord
 const NEW_WITHIN_DAYS = 14;
 
 const discordReady = Boolean(BOT_TOKEN && GUILD_ID);
@@ -97,6 +99,7 @@ async function discord(path, { method = "GET", body, reason } = {}, attempt = 0)
     const text = await res.text().catch(() => "");
     const err = new Error(`Discord ${method} ${path} → ${res.status} ${text.slice(0, 300)}`);
     err.status = res.status;
+    try { err.code = JSON.parse(text).code; } catch { /* not JSON */ }
     throw err;
   }
   return res.status === 204 ? null : res.json();
@@ -134,7 +137,8 @@ async function guildMembers({ fresh = false } = {}) {
 // ─── Holders ─────────────────────────────────────────────────────────────────
 const demoClaims = new Map(); // demo mode only: jobId → [{ id, name, avatar }]
 
-async function loadHolders({ fresh = false } = {}) {
+// track: compare with what open pages last saw and push any difference to them.
+async function loadHolders({ fresh = false, track = true } = {}) {
   let members = null;
   let warning = null;
   if (!DEMO && discordReady) {
@@ -160,6 +164,7 @@ async function loadHolders({ fresh = false } = {}) {
     }
     map.set(job.id, holders);
   }
+  if (track && members) noteChanges(map);
   return { map, members, warning };
 }
 
@@ -198,8 +203,27 @@ function broadcast(event, data) {
   const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of streams) res.write(msg);
 }
-const holdersSignature = (map) => JSON.stringify(JOBS.map((j) => [j.id, (map.get(j.id) || []).map((h) => h.id || h.name).sort()]));
-let lastSignature = null;
+// What open pages were last told about: jobId → sorted holder IDs.
+let lastSeen = null;
+const snapshot = (map) => new Map(JOBS.map((j) => [j.id, (map.get(j.id) || []).map((h) => h.id || h.name).sort()]));
+
+// Called with every fresh read of Discord. If a leader added or removed a role by
+// hand, tell every open page which jobs opened up or filled.
+function noteChanges(map) {
+  const now = snapshot(map);
+  if (lastSeen) {
+    const reopened = [];
+    const filled = [];
+    for (const job of JOBS) {
+      const before = lastSeen.get(job.id) || [];
+      const after = now.get(job.id) || [];
+      if (before.join(",") === after.join(",")) continue;
+      (after.length < before.length ? reopened : filled).push({ jobId: job.id, title: job.title });
+    }
+    if (reopened.length || filled.length) broadcast("jobs", { reason: "discord", reopened, filled });
+  }
+  lastSeen = now;
+}
 
 app.get("/api/stream", (req, res) => {
   res.writeHead(200, {
@@ -219,14 +243,8 @@ setInterval(() => { for (const res of streams) res.write(": ping\n\n"); }, 20_00
 // Catch role changes made directly in Discord, but only while someone is watching.
 setInterval(async () => {
   if (!streams.size || DEMO || !discordReady) return;
-  try {
-    const { map, members } = await loadHolders({ fresh: true });
-    if (!members) return;
-    const sig = holdersSignature(map);
-    if (lastSignature && sig !== lastSignature) broadcast("jobs", { reason: "discord" });
-    lastSignature = sig;
-  } catch { /* try again next round */ }
-}, 45_000).unref();
+  try { await loadHolders({ fresh: true }); } catch { /* try again next round */ }
+}, LIVE_CHECK_MS).unref();
 
 // One claim at a time, so two people can't grab the last slot together.
 let claimQueue = Promise.resolve();
@@ -426,6 +444,7 @@ app.post("/api/jobs/:id/accept", wrap(async (req, res) => {
       });
     } catch (err) {
       console.error("Role assignment failed:", err.message);
+      if (err.code === 10011) return { status: 503, error: `This job's Discord role no longer exists. Ask a ${GROUP_NAME} leader to create it again and update the role ID.` };
       if (err.status === 404) return { status: 403, error: `Join the ${GROUP_NAME} Discord server first, then come back to accept.` };
       return { status: 502, error: "Discord didn't accept the role change. Ask a CG leader to check the bot's permissions." };
     }
@@ -437,7 +456,8 @@ app.post("/api/jobs/:id/accept", wrap(async (req, res) => {
 
     const openingsLeft = Math.max(0, job.slots - holders.length - 1);
     broadcast("claimed", { jobId: job.id, title: job.title, name: user.name, openingsLeft });
-    lastSignature = null;
+    // Pages already know about this claim, so record it as seen.
+    lastSeen = snapshot((await loadHolders({ track: false })).map);
     let announced = false;
     try {
       announced = await announce(user, job, openingsLeft);

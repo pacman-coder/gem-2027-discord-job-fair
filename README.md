@@ -60,7 +60,7 @@ A third-party bot such as Carl-bot, MEE6 or Dyno can't be used, because the site
 ## How it works
 
 - **Who holds a job** comes straight from Discord roles, so there's no database. Remove someone by removing their role.
-- **Live updates:** each open page keeps a connection to the server. A claim reaches everyone in under a second. Role changes made directly in Discord show up within about a minute. A phone that was asleep refreshes when it wakes.
+- **Live updates:** each open page keeps a connection to the server. A claim reaches everyone in under a second. When a leader adds or removes a role in Discord, open pages update within about 45 seconds, and a note pops up when a job opens up again. A phone that was asleep refreshes when it wakes.
 - **Interviews** are graded on the server; answers never reach the browser. Most jobs need 2 of 3 correct; Marketing Coordinator needs all 3.
 - **Accepting** an offer within 15 minutes of passing adds the role and posts the shout-out.
 - One person can hold more than one job. Set `MAX_JOBS_PER_PERSON` to cap it.

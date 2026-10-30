@@ -1289,11 +1289,17 @@ a { color: inherit; }
   // When anyone accepts a job, every open page refreshes its folders: the stamp
   // flips to Filled, the name tag appears, and the Open / Filled counts move.
   let liveTimer = null;
-  let liveChanged = null;
+  const liveChanged = new Set();
   function onLive(type, data) {
     if (type === "claimed") {
-      liveChanged = data.jobId;
+      liveChanged.add(data.jobId);
       if (data.jobId !== S.justClaimed) toast(`${data.name} just accepted the ${data.title} role!`);
+    } else if (type === "jobs") {
+      // a leader added or removed a role in Discord
+      const reopened = data.reopened || [];
+      [...reopened, ...(data.filled || [])].forEach((j) => liveChanged.add(j.jobId));
+      if (reopened.length === 1) toast(`${reopened[0].title} just opened up!`);
+      else if (reopened.length > 1) toast(`${reopened.length} jobs just opened up: ${reopened.map((j) => j.title).join(", ")}.`);
     }
     clearTimeout(liveTimer);
     liveTimer = setTimeout(liveRefresh, 250);
@@ -1301,11 +1307,13 @@ a { color: inherit; }
   async function liveRefresh() {
     // wait until nobody is mid-swipe, mid-animation or mid-request
     if (drag || raf || busy) { liveTimer = setTimeout(liveRefresh, 400); return; }
-    const changed = liveChanged; liveChanged = null;
+    const changed = [...liveChanged]; liveChanged.clear();
     try { await refresh({ keepOpen: Boolean(S.open) }); } catch { return; }
-    if (changed && !S.open) {
-      const i = S.list.findIndex((j) => j.id === changed);
-      if (i >= 0) folders[i].classList.add("just-changed");
+    if (!S.open) {
+      for (const id of changed) {
+        const i = S.list.findIndex((j) => j.id === id);
+        if (i >= 0) folders[i].classList.add("just-changed");
+      }
     }
     if (!S.open) return;
     const fresh = S.jobs.find((j) => j.id === S.open.id);
